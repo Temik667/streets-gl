@@ -31,162 +31,177 @@ import ControlsSystem from "~/app/systems/ControlsSystem";
 import CursorStyleSystem from "~/app/systems/CursorStyleSystem";
 
 export default class RenderSystem extends System {
-	private renderer: AbstractRenderer;
-	private frameCount: number = 0;
+    private renderer: AbstractRenderer;
+    private frameCount: number = 0;
 
-	private renderGraph: RG.RenderGraph;
-	private renderGraphResourceFactory: RenderGraphResourceFactory;
-	private passManager: PassManager;
-	public fullScreenTriangle: FullScreenTriangle;
+    private renderGraph: RG.RenderGraph;
+    private renderGraphResourceFactory: RenderGraphResourceFactory;
+    private passManager: PassManager;
+    public fullScreenTriangle: FullScreenTriangle;
 
-	public postInit(): void {
-		const canvas = <HTMLCanvasElement>document.getElementById('canvas');
+    public postInit(): void {
+        const canvas = <HTMLCanvasElement>document.getElementById('canvas');
 
-		this.renderer = new WebGL2Renderer(canvas.getContext('webgl2', {powerPreference: "high-performance"}));
-		this.renderer.setSize(this.resolutionUI.x, this.resolutionUI.y);
+        this.renderer = new WebGL2Renderer(canvas.getContext('webgl2', {powerPreference: "high-performance"}));
+        this.renderer.setSize(this.resolutionUI.x, this.resolutionUI.y);
 
-		console.log(`Vendor: ${this.renderer.rendererInfo[0]} \nRenderer: ${this.renderer.rendererInfo[1]}`);
+        console.log(`Vendor: ${this.renderer.rendererInfo[0]} \nRenderer: ${this.renderer.rendererInfo[1]}`);
 
-		window.addEventListener('resize', () => this.resize());
+        window.addEventListener('resize', () => this.resize());
 
-		this.initScene();
-	}
+        this.initScene();
+    }
 
-	private initScene(): void {
-		this.fullScreenTriangle = new FullScreenTriangle(this.renderer);
+    private initScene(): void {
+        this.fullScreenTriangle = new FullScreenTriangle(this.renderer);
 
-		this.renderGraph = new RG.RenderGraph();
-		this.renderGraphResourceFactory = new RenderGraphResourceFactory(this.renderer);
-		this.passManager = new PassManager(
-			this.systemManager,
-			this.renderer,
-			this.renderGraphResourceFactory,
-			this.renderGraph,
-			this.systemManager.getSystem(SettingsSystem).settings
-		);
+        this.renderGraph = new RG.RenderGraph();
+        this.renderGraphResourceFactory = new RenderGraphResourceFactory(this.renderer);
+        this.passManager = new PassManager(
+            this.systemManager,
+            this.renderer,
+            this.renderGraphResourceFactory,
+            this.renderGraph,
+            this.systemManager.getSystem(SettingsSystem).settings
+        );
 
-		this.passManager.addPasses(
-			new GBufferPass(this.passManager),
-			new TAAPass(this.passManager),
-			new ShadowMappingPass(this.passManager),
-			new ShadingPass(this.passManager),
-			new ScreenPass(this.passManager),
-			new SSAOPass(this.passManager),
-			new SelectionPass(this.passManager),
-			new LabelPass(this.passManager),
-			new AtmosphereLUTPass(this.passManager),
-			new SSRPass(this.passManager),
-			new DoFPass(this.passManager),
-			new BloomPass(this.passManager),
-			new TerrainTexturesPass(this.passManager),
-			new SlippyMapPass(this.passManager)
-		);
+        this.passManager.addPasses(
+            new GBufferPass(this.passManager),
+            new TAAPass(this.passManager),
+            new ShadowMappingPass(this.passManager),
+            new ShadingPass(this.passManager),
+            new ScreenPass(this.passManager),
+            new SSAOPass(this.passManager),
+            new SelectionPass(this.passManager),
+            new LabelPass(this.passManager),
+            new AtmosphereLUTPass(this.passManager),
+            new SSRPass(this.passManager),
+            new DoFPass(this.passManager),
+            new BloomPass(this.passManager),
+            new TerrainTexturesPass(this.passManager),
+            new SlippyMapPass(this.passManager)
+        );
 
-		this.passManager.listenToSettings();
-	}
+        this.passManager.listenToSettings();
+    }
 
-	private resize(): void {
-		const {x: widthUI, y: heightUI} = this.resolutionUI;
-		const {x: widthScene, y: heightScene} = this.resolutionUI;
+    private resize(): void {
+        const {x: widthUI, y: heightUI} = this.resolutionUI;
+        const {x: widthScene, y: heightScene} = this.resolutionUI;
 
-		this.renderer.setSize(widthUI, heightUI);
-		this.passManager.resize();
+        this.renderer.setSize(widthUI, heightUI);
+        this.passManager.resize();
 
-		for (const pass of this.passManager.passes) {
-			pass.setSize(widthScene, heightScene);
-		}
-	}
+        for (const pass of this.passManager.passes) {
+            pass.setSize(widthScene, heightScene);
+        }
+    }
 
-	public update(deltaTime: number): void {
-		const controlsSystem = this.systemManager.getSystem(ControlsSystem);
-		const sceneSystem = this.systemManager.getSystem(SceneSystem);
-		const settings = this.systemManager.getSystem(SettingsSystem).settings;
-		const tiles = sceneSystem.objects.tiles;
+    public update(deltaTime: number): void {
+        const controlsSystem = this.systemManager.getSystem(ControlsSystem);
+        const sceneSystem = this.systemManager.getSystem(SceneSystem);
+        const settings = this.systemManager.getSystem(SettingsSystem).settings;
+        const tiles = sceneSystem.objects.tiles;
 
-		this.passManager.updateRenderGraph(
-			controlsSystem.isSlippyMapVisible,
-			controlsSystem.isTilesVisible
-		);
+        this.passManager.updateRenderGraph(
+            controlsSystem.isSlippyMapVisible,
+            controlsSystem.isTilesVisible
+        );
 
-		if (settings.get('labels').statusValue === 'on') {
-			sceneSystem.objects.labels.updateFromTiles(tiles, sceneSystem.objects.camera, this.resolutionScene);
-		}
+        if (settings.get('labels').statusValue === 'on') {
+            sceneSystem.objects.labels.updateFromTiles(tiles, sceneSystem.objects.camera, this.resolutionScene);
+        }
 
-		for (const object of sceneSystem.getObjectsToUpdateMesh()) {
-			object.updateMesh(this.renderer);
-		}
+        for (const object of sceneSystem.getObjectsToUpdateMesh()) {
+            object.updateMesh(this.renderer);
+        }
 
-		const jitterFactor = settings.get('taa').statusValue === 'on' ? 1 : 0;
+        const jitterFactor = settings.get('taa').statusValue === 'on' ? 1 : 0;
 
-		sceneSystem.objects.camera.updateJitteredProjectionMatrix(
-			this.frameCount,
-			this.resolutionScene.x,
-			this.resolutionScene.y,
-			jitterFactor
-		);
+        // 1. Let the engine calculate the base projection matrix AND the sub-pixel TAA jitter
+        sceneSystem.objects.camera.updateJitteredProjectionMatrix(
+            this.frameCount,
+            this.resolutionScene.x,
+            this.resolutionScene.y,
+            jitterFactor
+        );
 
-		this.renderGraph.render();
+        // 2. INJECT OBLIQUE FRUSTUM (SHEAR) HERE
+        // By modifying it right here, we guarantee it gets sent to the GPU render graph
+        if (sceneSystem.objects.camera && sceneSystem.objects.camera.projectionMatrix) {
+            const timePhase = this.frameCount * 0.05;
+            
+            // Calculate dynamic diagonal slice
+            const tiltX = Math.sin(timePhase) * 0.5;
+            const tiltY = Math.cos(timePhase * 0.8) * 0.5;
 
-		this.pickObjectId();
+            // Use += so we don't accidentally overwrite the TAA sub-pixel jitter
+            sceneSystem.objects.camera.projectionMatrix[8] += tiltX;
+            sceneSystem.objects.camera.projectionMatrix[9] += tiltY;
+        }
 
-		++this.frameCount;
-	}
+        this.renderGraph.render();
 
-	public getLastRenderGraph(): Set<RG.Node> {
-		return this.renderGraph.lastGraph;
-	}
+        this.pickObjectId();
 
-	public getLastRenderGraphPassList(): RG.Pass<any>[] {
-		return this.renderGraph.lastSortedPassList;
-	}
+        ++this.frameCount;
+    }
 
-	public getRenderGraphNodeConnectionSets(): {
-		indegree: Map<Node, Set<Node>>;
-		outdegree: Map<Node, Set<Node>>;
-	} {
-		return {
-			indegree: this.renderGraph.indegreeSets,
-			outdegree: this.renderGraph.outdegreeSets
-		};
-	}
+    public getLastRenderGraph(): Set<RG.Node> {
+        return this.renderGraph.lastGraph;
+    }
 
-	public createTileTexture(image: HTMLImageElement): AbstractTexture2D {
-		return this.renderer.createTexture2D({
-			width: image.width,
-			height: image.height,
-			data: image,
-			minFilter: RendererTypes.MinFilter.Linear,
-			magFilter: RendererTypes.MagFilter.Linear,
-			wrap: RendererTypes.TextureWrap.ClampToEdge,
-			format: RendererTypes.TextureFormat.RGBA8Unorm,
-			mipmaps: false,
-			flipY: false
-		});
-	}
+    public getLastRenderGraphPassList(): RG.Pass<any>[] {
+        return this.renderGraph.lastSortedPassList;
+    }
 
-	private pickObjectId(): void {
-		const pickingSystem = this.systemManager.getSystem(PickingSystem);
-		const controlsSystem = this.systemManager.getSystem(ControlsSystem);
-		const pass = <GBufferPass>this.passManager.getPass('GBufferPass');
+    public getRenderGraphNodeConnectionSets(): {
+        indegree: Map<Node, Set<Node>>;
+        outdegree: Map<Node, Set<Node>>;
+    } {
+        return {
+            indegree: this.renderGraph.indegreeSets,
+            outdegree: this.renderGraph.outdegreeSets
+        };
+    }
 
-		if (!pass || !controlsSystem.isTilesVisible) {
-			pickingSystem.clearHoveredObjectId();
-			return;
-		}
+    public createTileTexture(image: HTMLImageElement): AbstractTexture2D {
+        return this.renderer.createTexture2D({
+            width: image.width,
+            height: image.height,
+            data: image,
+            minFilter: RendererTypes.MinFilter.Linear,
+            magFilter: RendererTypes.MagFilter.Linear,
+            wrap: RendererTypes.TextureWrap.ClampToEdge,
+            format: RendererTypes.TextureFormat.RGBA8Unorm,
+            mipmaps: false,
+            flipY: false
+        });
+    }
 
-		pass.objectIdX = pickingSystem.pointerPosition.x;
-		pass.objectIdY = pickingSystem.pointerPosition.y;
+    private pickObjectId(): void {
+        const pickingSystem = this.systemManager.getSystem(PickingSystem);
+        const controlsSystem = this.systemManager.getSystem(ControlsSystem);
+        const pass = <GBufferPass>this.passManager.getPass('GBufferPass');
 
-		pickingSystem.readObjectId(pass.objectIdBuffer);
-	}
+        if (!pass || !controlsSystem.isTilesVisible) {
+            pickingSystem.clearHoveredObjectId();
+            return;
+        }
 
-	public get resolutionUI(): Vec2 {
-		const pixelRatio = window.devicePixelRatio;
-		return new Vec2(window.innerWidth * pixelRatio, window.innerHeight * pixelRatio);
-	}
+        pass.objectIdX = pickingSystem.pointerPosition.x;
+        pass.objectIdY = pickingSystem.pointerPosition.y;
 
-	public get resolutionScene(): Vec2 {
-		const pixelRatio = 1;
-		return new Vec2(window.innerWidth * pixelRatio, window.innerHeight * pixelRatio);
-	}
+        pickingSystem.readObjectId(pass.objectIdBuffer);
+    }
+
+    public get resolutionUI(): Vec2 {
+        const pixelRatio = window.devicePixelRatio;
+        return new Vec2(window.innerWidth * pixelRatio, window.innerHeight * pixelRatio);
+    }
+
+    public get resolutionScene(): Vec2 {
+        const pixelRatio = 1;
+        return new Vec2(window.innerWidth * pixelRatio, window.innerHeight * pixelRatio);
+    }
 }
