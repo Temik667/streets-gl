@@ -23,12 +23,14 @@ uniform PerMesh {
     uint tileId;
 };
 
-// CLEANED UP UBO
+// SYNCED UBO: Must exactly match TypeScript and Fragment Shader
 uniform PerMaterial {
     mat4 projectionMatrix;
     float windowLightThreshold;
     float u_errorNearClip;
     float u_errorFarClip;
+    float u_planeTiltX;
+    float u_planeTiltY;
 };
 
 void main() {
@@ -49,7 +51,6 @@ void main() {
 
     vPosition = vec3(cameraSpacePosition);
 
-    // RESTORED CLEAN PROJECTION (No Dancing)
     vClipPos = projectionMatrix * cameraSpacePosition;
     vClipPosPrev = projectionMatrix * cameraSpacePositionPrev;
 

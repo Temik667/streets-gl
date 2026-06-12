@@ -226,21 +226,32 @@ export default class GBufferPass extends Pass<{
         const sceneSystem = this.manager.systemManager.getSystem(SceneSystem);
         const timePhase = (sceneSystem as any).timeElapsed * 2.0 || 0; 
 
-        // CLEANED UP: Only distance clipping parameters remain
-        const artificialNear = 80 + Math.sin(timePhase) * 70.0;
+        // 1. SET CLIPPING DISTANCES
+        const artificialNear = 80.0; 
         const artificialFar = 5000.0;
+
+        // 2. CALCULATE DYNAMIC TILT ANGLES
+        const tiltX = Math.sin(timePhase) * 0.8;
+        const tiltY = Math.cos(timePhase * 0.5) * 0.4;
 
         this.renderer.useMaterial(this.extrudedMeshMaterial);
 
         this.extrudedMeshMaterial.getUniform('projectionMatrix', 'PerMaterial').value = new Float32Array(camera.jitteredProjectionMatrix.values);
         this.extrudedMeshMaterial.getUniform<UniformFloat1>('windowLightThreshold', 'PerMaterial').value[0] = windowLightThreshold;
 
-        // ONLY update distance clipping parameters
+        // 3. BIND DISTANCE UNIFORMS
         const uNearClip = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_errorNearClip', 'PerMaterial');
         if (uNearClip) uNearClip.value[0] = artificialNear;
 
         const uFarClip = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_errorFarClip', 'PerMaterial');
         if (uFarClip) uFarClip.value[0] = artificialFar;
+
+        // 4. BIND TILT UNIFORMS
+        const uTiltX = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_planeTiltX', 'PerMaterial');
+        if (uTiltX) uTiltX.value[0] = tiltX;
+
+        const uTiltY = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_planeTiltY', 'PerMaterial');
+        if (uTiltY) uTiltY.value[0] = tiltY;
 
         this.extrudedMeshMaterial.updateUniformBlock('PerMaterial');
 

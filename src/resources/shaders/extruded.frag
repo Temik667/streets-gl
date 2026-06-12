@@ -24,6 +24,8 @@ uniform PerMaterial {
     float windowLightThreshold;
     float u_errorNearClip;
     float u_errorFarClip;
+    float u_planeTiltX;
+    float u_planeTiltY;
 };
 
 uniform sampler2DArray tMap;
@@ -57,10 +59,13 @@ vec3 getNormalValue(int textureId) {
 }
 
 void main() {
-    // Pure, isolated hardware clipping simulation
-    float distToCamera = length(vPosition);
+    // 2. CALCULATE TILTED PLANAR DEPTH
+    // -vPosition.z is the flat distance from the camera.
+    // We add the X and Y coordinates multiplied by our tilt factors to slant the plane.
+    float planarDepth = -vPosition.z + (vPosition.x * u_planeTiltX) + (vPosition.y * u_planeTiltY);
 
-    if (distToCamera < u_errorNearClip || distToCamera > u_errorFarClip) {
+    // 3. EVALUATE CLIP
+    if (planarDepth < u_errorNearClip || planarDepth > u_errorFarClip) {
         discard; 
     }
 

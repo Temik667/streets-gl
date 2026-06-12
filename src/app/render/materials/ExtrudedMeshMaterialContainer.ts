@@ -36,20 +36,27 @@ export default class ExtrudedMeshMaterialContainer extends MaterialContainer {
                     block: 'PerMaterial',
                     type: RendererTypes.UniformType.Float1,
                     value: new Float32Array(1)
-                }, 
-                // CLEANED UP: Only clip parameters remain
-                {
+                }, {
                     name: 'u_errorNearClip',
                     block: 'PerMaterial',
                     type: RendererTypes.UniformType.Float1,
-                    value: new Float32Array([0.0])
+                    value: new Float32Array(1)
                 }, {
                     name: 'u_errorFarClip',
                     block: 'PerMaterial',
                     type: RendererTypes.UniformType.Float1,
-                    value: new Float32Array([100000.0])
-                },
-                {
+                    value: new Float32Array(1)
+                }, {
+                    name: 'u_planeTiltX',
+                    block: 'PerMaterial',
+                    type: RendererTypes.UniformType.Float1,
+                    value: new Float32Array(1)
+                }, {
+                    name: 'u_planeTiltY',
+                    block: 'PerMaterial',
+                    type: RendererTypes.UniformType.Float1,
+                    value: new Float32Array(1)
+                }, {
                     name: 'tMap',
                     block: null,
                     type: RendererTypes.UniformType.Texture2DArray,
