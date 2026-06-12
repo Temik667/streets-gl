@@ -231,8 +231,8 @@ export default class GBufferPass extends Pass<{
         const artificialFar = 5000.0;
 
         // 2. CALCULATE DYNAMIC TILT ANGLES
-        const tiltX = Math.sin(timePhase) * 0.8;
-        const tiltY = Math.cos(timePhase * 0.5) * 0.4;
+        const tiltX = 1;
+        const tiltY = 1;
 
         this.renderer.useMaterial(this.extrudedMeshMaterial);
 
