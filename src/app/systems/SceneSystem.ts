@@ -41,7 +41,7 @@ export default class SceneSystem extends System {
     public pivotDelta: Vec2 = new Vec2();
     
     // Added to track continuous time for our clipping oscillations
-    private timeElapsed: number = 0; 
+    public timeElapsed: number = 0; 
 
     public postInit(): void {
         this.initScene();
@@ -85,43 +85,6 @@ export default class SceneSystem extends System {
             instancedObjects: new Map(),
             instancedAircraftParts: new Map()
         };
-
-        /*this.objects.instancedAircraftParts.set(
-            AircraftPartType.B777Body,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftB777'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.A321Body,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftA321'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.Cessna208Body,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftCessna208'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.ERJ135Body,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftERJ135'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.HelicopterBody,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftHeliBody'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.HelicopterRotorSpinning,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftHeliRotor'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.HelicopterRotorStatic,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftHeliRotorStatic'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.HelicopterTailRotorSpinning,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftHeliRotorTail'))
-        );
-        this.objects.instancedAircraftParts.set(
-            AircraftPartType.HelicopterTailRotorStatic,
-            new InstancedAircraftPart(ModelManager.getGLTFModel('aircraftHeliRotorTailStatic'))
-        );*/
 
         this.objects.instancedObjects.set('tree', new InstancedTree(ModelManager.getGLTFModel('tree')));
         this.objects.instancedObjects.set('adColumn', new GenericInstancedObject(ModelManager.getGLTFModel('adColumn')));
@@ -182,7 +145,6 @@ export default class SceneSystem extends System {
 
         while (objects.length > 0) {
             const object = objects.shift();
-
             objects.push(...object.children);
 
             if (object instanceof RenderableObject3D && !object.isMeshReady()) {
@@ -290,21 +252,19 @@ export default class SceneSystem extends System {
 
         this.updateTiles();
 
-        // INTENTIONAL SENSOR ARTIFACT INJECTION
-        // Accumulate time and dynamically mutate the near/far planes.
-        // Because we do this here and call updateProjectionMatrix(), 
-        // the engine's built-in matrices handle the WebGL push naturally.
+        // Accumulate time publicly so the RenderSystem can synchronize with the same phase
         this.timeElapsed += deltaTime;
         const timePhase = this.timeElapsed * 2.0;
 
-        this.objects.camera.near = 80.0 + Math.sin(timePhase) * 70.0;
-        this.objects.camera.far = 500.0 + Math.cos(timePhase * 0.8) * 300.0;
+        // INJECT NEAR PLANE ARTIFACT
         this.objects.camera.updateProjectionMatrix();
 
-        //this.scene.updateMatrixRecursively();
         this.scene.updateMatrixWorldRecursively();
 
         this.objects.camera.updateMatrixWorldInverse();
-        this.objects.camera.updateFrustum();
+        
+        // Note: The frustum updated here will be immediately overridden by the RenderSystem 
+        // to account for the matrix shear, ensuring proper culling.
+        this.objects.camera.updateFrustum(); 
     }
 }

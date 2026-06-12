@@ -118,7 +118,7 @@ export default class RenderSystem extends System {
 
         const jitterFactor = settings.get('taa').statusValue === 'on' ? 1 : 0;
 
-        // 1. Let the engine calculate the base projection matrix AND the sub-pixel TAA jitter
+        // 1. Engine calculates base projection matrix AND sub-pixel TAA jitter
         sceneSystem.objects.camera.updateJitteredProjectionMatrix(
             this.frameCount,
             this.resolutionScene.x,
@@ -126,19 +126,21 @@ export default class RenderSystem extends System {
             jitterFactor
         );
 
-        // 2. INJECT OBLIQUE FRUSTUM (SHEAR) HERE
-        // By modifying it right here, we guarantee it gets sent to the GPU render graph
+        // 2. INJECT OBLIQUE FRUSTUM (SHEAR)
         if (sceneSystem.objects.camera && sceneSystem.objects.camera.projectionMatrix) {
-            const timePhase = this.frameCount * 0.05;
+            // Sync with SceneSystem's time Phase for consistent anomaly motion
+            const timePhase = sceneSystem.timeElapsed * 2.0; 
             
-            // Calculate dynamic diagonal slice
             const tiltX = Math.sin(timePhase) * 0.5;
             const tiltY = Math.cos(timePhase * 0.8) * 0.5;
-
-            // Use += so we don't accidentally overwrite the TAA sub-pixel jitter
+            
             sceneSystem.objects.camera.projectionMatrix[8] += tiltX;
             sceneSystem.objects.camera.projectionMatrix[9] += tiltY;
         }
+
+        // 3. CRITICAL: Recalculate frustum planes AFTER modifying the matrix
+        // This ensures the CPU culling matches the GPU's sheared matrix.
+        sceneSystem.objects.camera.updateFrustum();
 
         this.renderGraph.render();
 

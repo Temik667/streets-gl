@@ -18,9 +18,12 @@ uniform PerMesh {
     uint tileId;
 };
 
+// CLEANED UP UBO
 uniform PerMaterial {
     mat4 projectionMatrix;
     float windowLightThreshold;
+    float u_errorNearClip;
+    float u_errorFarClip;
 };
 
 uniform sampler2DArray tMap;
@@ -54,6 +57,13 @@ vec3 getNormalValue(int textureId) {
 }
 
 void main() {
+    // Pure, isolated hardware clipping simulation
+    float distToCamera = length(vPosition);
+
+    if (distToCamera < u_errorNearClip || distToCamera > u_errorFarClip) {
+        discard; 
+    }
+
     vec3 mask = getMaskValue(vTextureId);
     float noiseTextureWidth = vec2(textureSize(tNoise, 0)).r;
 
@@ -72,7 +82,6 @@ void main() {
     }
 
     outColor = getColorValue(vTextureId, mask.b, vColor);
-    //outColor = vec4(fract(vUv), 0, 1);
     outGlow = getGlowColor(vTextureId) * WINDOW_GLOW_COLOR * glowFactor;
     outNormal = packNormal(getNormalValue(vTextureId));
     outRoughnessMetalnessF0 = vec3(mask.r, mask.g, 0.03);

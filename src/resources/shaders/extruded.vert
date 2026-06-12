@@ -23,9 +23,12 @@ uniform PerMesh {
     uint tileId;
 };
 
+// CLEANED UP UBO
 uniform PerMaterial {
     mat4 projectionMatrix;
     float windowLightThreshold;
+    float u_errorNearClip;
+    float u_errorFarClip;
 };
 
 void main() {
@@ -46,6 +49,7 @@ void main() {
 
     vPosition = vec3(cameraSpacePosition);
 
+    // RESTORED CLEAN PROJECTION (No Dancing)
     vClipPos = projectionMatrix * cameraSpacePosition;
     vClipPosPrev = projectionMatrix * cameraSpacePositionPrev;
 
