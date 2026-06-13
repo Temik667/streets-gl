@@ -227,12 +227,12 @@ export default class GBufferPass extends Pass<{
         const timePhase = (sceneSystem as any).timeElapsed * 2.0 || 0; 
 
         // 1. SET CLIPPING DISTANCES
-        const artificialNear = 80.0; 
-        const artificialFar = 5000.0;
+        const artificialNear = 415.0; 
+        const artificialFar = 2872.0;
 
         // 2. CALCULATE DYNAMIC TILT ANGLES
-        const tiltX = 1;
-        const tiltY = 1;
+        const tiltX = 3.4874;
+        const tiltY = 9.5144;
 
         this.renderer.useMaterial(this.extrudedMeshMaterial);
 
