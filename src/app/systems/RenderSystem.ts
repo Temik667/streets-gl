@@ -111,13 +111,13 @@ public update(deltaTime: number): void {
         const tiles = sceneSystem.objects.tiles;
 
         // --- 1. DISABLE LENS AND BLUR EFFECTS ---
-        const opticalSettings = ['taa', 'dof', 'bloom', 'ssr'];
-        for (const key of opticalSettings) {
-            const setting = settings.get(key);
-            if (setting && setting.statusValue !== 'off') {
-                setting.statusValue = 'off';
-            }
-        }
+        // const opticalSettings = ['taa', 'dof', 'bloom', 'ssr'];
+        // for (const key of opticalSettings) {
+        //     const setting = settings.get(key);
+        //     if (setting && setting.statusValue !== 'off') {
+        //         setting.statusValue = 'off';
+        //     }
+        // }
 
         // --- 2. PERMANENTLY DISABLE UI LABELS (TEXT) ---
         if (settings.get('labels').statusValue !== 'off') {
@@ -226,7 +226,7 @@ public update(deltaTime: number): void {
         // 1.0 is native resolution. 
         // 0.5 is half resolution (standard aliasing).
         // 0.25 or lower creates severe, blocky, PS1-era aliasing and flickering geometry.
-        const degradationFactor = 0.25; 
+        const degradationFactor = 1; 
         
         return new Vec2(
             Math.floor(window.innerWidth * degradationFactor), 

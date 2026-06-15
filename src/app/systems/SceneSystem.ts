@@ -246,25 +246,35 @@ export default class SceneSystem extends System {
         const lightDirection = this.systemManager.getSystem(MapTimeSystem).lightDirection;
         const lightIntensity = this.systemManager.getSystem(MapTimeSystem).lightIntensity;
 
+        // --- TRACK CONTINUOUS TIME FOR DYNAMIC ANOMALIES ---
+        // (Ensure 'public timeElapsed: number = 0;' is declared at the top of your SceneSystem class)
+        this.timeElapsed = (this.timeElapsed || 0) + deltaTime;
+        const timePhase = this.timeElapsed * 2.0;
+
+        // --- INJECT SHADOW ANOMALIES (Targetable by Python) ---
+        // Standard shadowBias is -0.003. 
+        // > 0.00  = Shadow Acne (Moiré patterns)
+        // < -0.02 = Peter Panning (Detached, bleeding shadows)
+        const injectedShadowBias = -0.003; 
+        
+        // Standard shadowNormalBias is 0.002.
+        const injectedNormalBias = 0.002; 
+
+        // Apply to the Cascaded Shadow Map
+        this.objects.csm.shadowBias = injectedShadowBias;
+        this.objects.csm.shadowNormalBias = injectedNormalBias;
+        // ------------------------------------------------------
+
         this.objects.csm.direction = Vec3.clone(lightDirection);
         this.objects.csm.intensity = lightIntensity;
         this.objects.csm.update();
 
         this.updateTiles();
 
-        // Accumulate time publicly so the RenderSystem can synchronize with the same phase
-        this.timeElapsed += deltaTime;
-        const timePhase = this.timeElapsed * 2.0;
-
-        // INJECT NEAR PLANE ARTIFACT
-        this.objects.camera.updateProjectionMatrix();
-
+        //this.scene.updateMatrixRecursively();
         this.scene.updateMatrixWorldRecursively();
 
         this.objects.camera.updateMatrixWorldInverse();
-        
-        // Note: The frustum updated here will be immediately overridden by the RenderSystem 
-        // to account for the matrix shear, ensuring proper culling.
-        this.objects.camera.updateFrustum(); 
+        this.objects.camera.updateFrustum();
     }
 }
