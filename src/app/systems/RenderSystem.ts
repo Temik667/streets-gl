@@ -42,7 +42,14 @@ export default class RenderSystem extends System {
     public postInit(): void {
         const canvas = <HTMLCanvasElement>document.getElementById('canvas');
 
-        this.renderer = new WebGL2Renderer(canvas.getContext('webgl2', {powerPreference: "high-performance"}));
+        // FORCE NEAREST-NEIGHBOR UPSCALING
+        // This prevents the browser from blurring your low-res aliased output
+        canvas.style.imageRendering = 'pixelated';
+
+        this.renderer = new WebGL2Renderer(canvas.getContext('webgl2', {
+            powerPreference: "high-performance",
+            antialias: false // Hardware MSAA stays off
+        }));
         this.renderer.setSize(this.resolutionUI.x, this.resolutionUI.y);
 
         console.log(`Vendor: ${this.renderer.rendererInfo[0]} \nRenderer: ${this.renderer.rendererInfo[1]}`);
@@ -103,11 +110,17 @@ export default class RenderSystem extends System {
         const settings = this.systemManager.getSystem(SettingsSystem).settings;
         const tiles = sceneSystem.objects.tiles;
 
-        this.passManager.updateRenderGraph(
-            controlsSystem.isSlippyMapVisible,
-            controlsSystem.isTilesVisible
-        );
+                // Force TAA off
+        if (settings.get('taa').statusValue !== 'off') {
+            settings.get('taa').statusValue = 'off';
+        }
 
+        // FORCE LABELS OFF FOR CLEAN DATASET GENERATION
+        if (settings.get('labels').statusValue !== 'off') {
+            settings.get('labels').statusValue = 'off';
+        }
+
+        // The engine will now completely skip the label update logic
         if (settings.get('labels').statusValue === 'on') {
             sceneSystem.objects.labels.updateFromTiles(tiles, sceneSystem.objects.camera, this.resolutionScene);
         }
@@ -116,9 +129,10 @@ export default class RenderSystem extends System {
             object.updateMesh(this.renderer);
         }
 
-        const jitterFactor = settings.get('taa').statusValue === 'on' ? 1 : 0;
+        // 3. FORCE CAMERA JITTER TO 0
+        // TAA relies on sub-pixel jittering to blend frames. We kill it here.
+        const jitterFactor = 0;
 
-        // 1. Engine calculates base projection matrix AND sub-pixel TAA jitter
         sceneSystem.objects.camera.updateJitteredProjectionMatrix(
             this.frameCount,
             this.resolutionScene.x,
@@ -126,20 +140,16 @@ export default class RenderSystem extends System {
             jitterFactor
         );
 
-        // 2. INJECT OBLIQUE FRUSTUM (SHEAR)
         if (sceneSystem.objects.camera && sceneSystem.objects.camera.projectionMatrix) {
-            // Sync with SceneSystem's time Phase for consistent anomaly motion
             const timePhase = sceneSystem.timeElapsed * 2.0; 
             
             const tiltX = Math.sin(timePhase) * 0.5;
             const tiltY = Math.cos(timePhase * 0.8) * 0.5;
-            
+
             sceneSystem.objects.camera.projectionMatrix[8] += tiltX;
             sceneSystem.objects.camera.projectionMatrix[9] += tiltY;
         }
 
-        // 3. CRITICAL: Recalculate frustum planes AFTER modifying the matrix
-        // This ensures the CPU culling matches the GPU's sheared matrix.
         sceneSystem.objects.camera.updateFrustum();
 
         this.renderGraph.render();
@@ -203,7 +213,15 @@ export default class RenderSystem extends System {
     }
 
     public get resolutionScene(): Vec2 {
-        const pixelRatio = 1;
-        return new Vec2(window.innerWidth * pixelRatio, window.innerHeight * pixelRatio);
+        // --- SENSOR DEGRADATION ---
+        // 1.0 is native resolution. 
+        // 0.5 is half resolution (standard aliasing).
+        // 0.25 or lower creates severe, blocky, PS1-era aliasing and flickering geometry.
+        const degradationFactor = 0.25; 
+        
+        return new Vec2(
+            Math.floor(window.innerWidth * degradationFactor), 
+            Math.floor(window.innerHeight * degradationFactor)
+        );
     }
 }
