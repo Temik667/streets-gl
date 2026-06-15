@@ -104,23 +104,35 @@ export default class RenderSystem extends System {
         }
     }
 
-    public update(deltaTime: number): void {
+public update(deltaTime: number): void {
         const controlsSystem = this.systemManager.getSystem(ControlsSystem);
         const sceneSystem = this.systemManager.getSystem(SceneSystem);
         const settings = this.systemManager.getSystem(SettingsSystem).settings;
         const tiles = sceneSystem.objects.tiles;
 
-                // Force TAA off
-        if (settings.get('taa').statusValue !== 'off') {
-            settings.get('taa').statusValue = 'off';
+        // --- 1. DISABLE LENS AND BLUR EFFECTS ---
+        const opticalSettings = ['taa', 'dof', 'bloom', 'ssr'];
+        for (const key of opticalSettings) {
+            const setting = settings.get(key);
+            if (setting && setting.statusValue !== 'off') {
+                setting.statusValue = 'off';
+            }
         }
 
-        // FORCE LABELS OFF FOR CLEAN DATASET GENERATION
+        // --- 2. PERMANENTLY DISABLE UI LABELS (TEXT) ---
         if (settings.get('labels').statusValue !== 'off') {
             settings.get('labels').statusValue = 'off';
         }
 
-        // The engine will now completely skip the label update logic
+        // Force jitter to 0 to keep the camera mathematically still
+        const jitterFactor = 0; 
+
+        this.passManager.updateRenderGraph(
+            controlsSystem.isSlippyMapVisible,
+            controlsSystem.isTilesVisible
+        );
+
+        // Because we forced it off above, the engine will safely skip calculating the text meshes entirely
         if (settings.get('labels').statusValue === 'on') {
             sceneSystem.objects.labels.updateFromTiles(tiles, sceneSystem.objects.camera, this.resolutionScene);
         }
@@ -129,10 +141,6 @@ export default class RenderSystem extends System {
             object.updateMesh(this.renderer);
         }
 
-        // 3. FORCE CAMERA JITTER TO 0
-        // TAA relies on sub-pixel jittering to blend frames. We kill it here.
-        const jitterFactor = 0;
-
         sceneSystem.objects.camera.updateJitteredProjectionMatrix(
             this.frameCount,
             this.resolutionScene.x,
@@ -140,8 +148,9 @@ export default class RenderSystem extends System {
             jitterFactor
         );
 
+        // --- 3. APPLY YOUR TILTED SHEAR ANOMALIES ---
         if (sceneSystem.objects.camera && sceneSystem.objects.camera.projectionMatrix) {
-            const timePhase = sceneSystem.timeElapsed * 2.0; 
+            const timePhase = (sceneSystem as any).timeElapsed * 2.0 || 0; 
             
             const tiltX = Math.sin(timePhase) * 0.5;
             const tiltY = Math.cos(timePhase * 0.8) * 0.5;
