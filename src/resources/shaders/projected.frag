@@ -80,7 +80,14 @@ void main() {
 		outNormal = packNormal(mvWaterNormal);
 		outRoughnessMetalnessF0 = vec3(0.05, 0, 0.03);
 		outMotion = getMotionVector(vClipPos, vClipPosPrev);
-		outObjectId = 0u;
+        
+		// 1. VISUAL TRAP FOR WATER
+		if (!gl_FrontFacing) {
+			outColor = vec4(1.0, 0.0, 1.0, 1.0); // Neon Pink
+			outObjectId = 4294967295u;
+		} else {
+			outObjectId = 0u;
+		}
 
 		return;
 	}

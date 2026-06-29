@@ -85,6 +85,8 @@ export default class GBufferPass extends Pass<{
     public objectIdX = 0;
     public objectIdY = 0;
     private fullScreenTriangle: FullScreenTriangle;
+    // --- Added for deterministic on-demand object-id reads (debug / dataset QA) ---
+    private pendingIdRequest: { x: number; y: number; resolve: (id: number) => void } | null = null;
 
     public constructor(manager: PassManager) {
         super('GBufferPass', manager, {
@@ -227,12 +229,12 @@ export default class GBufferPass extends Pass<{
         const timePhase = (sceneSystem as any).timeElapsed * 2.0 || 0; 
 
         // 1. SET CLIPPING DISTANCES
-        const artificialNear = 50; 
-        const artificialFar = 5000;
+        const artificialNear = 100.0; 
+        const artificialFar = 5000.0;
 
         // 2. CALCULATE DYNAMIC TILT ANGLES
-        const tiltX = 0;
-        const tiltY = 0;
+        const tiltX = 0.0000;
+        const tiltY = 0.0000;
 
         this.renderer.useMaterial(this.extrudedMeshMaterial);
 
@@ -531,8 +533,34 @@ export default class GBufferPass extends Pass<{
     }
 
     private writeToObjectIdBuffer(): void {
+        // If someone asked for a specific coordinate, honor it for THIS read.
+        if (this.pendingIdRequest) {
+            this.objectIdX = this.pendingIdRequest.x;
+            this.objectIdY = this.pendingIdRequest.y;
+        }
+
         const mainRenderPass = this.getPhysicalResource('GBufferRenderPass');
         mainRenderPass.readColorAttachmentPixel(4, this.objectIdBuffer, this.objectIdX, this.objectIdY);
+
+        // Resolve AFTER the read, so the caller gets fresh data from this frame.
+        if (this.pendingIdRequest) {
+            this.pendingIdRequest.resolve(this.objectIdBuffer[0]);
+            this.pendingIdRequest = null;
+    }
+    }
+
+    /**
+     * Requests an object-id read at (x, y) on the NEXT render pass, and resolves
+     * once that render has actually happened and the buffer reflects it.
+     * Use this instead of setting objectIdX/objectIdY + reading objectIdBuffer
+     * directly — that pattern reads stale data because writeToObjectIdBuffer()
+     * only runs once per frame, AFTER drawing, at whatever coordinates were set
+     * before that frame started.
+     */
+    public requestObjectIdAt(x: number, y: number): Promise<number> {
+        return new Promise<number>((resolve) => {
+            this.pendingIdRequest = {x: Math.floor(x), y: Math.floor(y), resolve};
+        });
     }
 
     private getInstancesOrigin(camera: Camera): Vec2 {

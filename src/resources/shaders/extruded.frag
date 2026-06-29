@@ -91,5 +91,12 @@ void main() {
     outNormal = packNormal(getNormalValue(vTextureId));
     outRoughnessMetalnessF0 = vec3(mask.r, mask.g, 0.03);
     outMotion = getMotionVector(vClipPos, vClipPosPrev);
-    outObjectId = vObjectId;
+    
+    if (!gl_FrontFacing) {
+        outObjectId = 4294967295u; 
+        outColor = vec4(1.0, 0.0, 1.0, 1.0); // Force the pixels to NEON PINK
+    } else {
+        outObjectId = vObjectId;
+        // (Leave the standard outColor assignment above this block intact)
+    }
 }
