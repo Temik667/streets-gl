@@ -10,10 +10,18 @@ interface MeshDisplayBufferPatch {
 	size: number;
 	value: number;
 }
+interface MeshPositionBufferPatch {
+    start: number;
+    size: number;
+    dx: number;
+    dy: number;
+    dz: number;
+}
 
 export default class TileExtrudedMesh extends RenderableObject3D {
 	public mesh: AbstractMesh = null;
 	private meshDisplayBufferPatches: MeshDisplayBufferPatch[] = [];
+	private meshPositionBufferPatches: MeshPositionBufferPatch[] = [];
 
 	public constructor(private buffers: Tile3DBuffersExtruded) {
 		super();
@@ -30,11 +38,20 @@ export default class TileExtrudedMesh extends RenderableObject3D {
 		this.meshDisplayBufferPatches.push(patch);
 	}
 
+	public addPositionPatch(patch: MeshPositionBufferPatch): void {
+    this.meshPositionBufferPatches.push(patch);
+	}
+
 	public isMeshReady(): boolean {
-		return this.mesh !== null && this.meshDisplayBufferPatches.length === 0;
+		return this.mesh !== null 
+			&& this.meshDisplayBufferPatches.length === 0
+			&& this.meshPositionBufferPatches.length === 0;
 	}
 
 	public updateMesh(renderer: AbstractRenderer): void {
+		if (this.meshPositionBufferPatches.length > 0) {
+        console.log('[DEBUG updateMesh] applying', this.meshPositionBufferPatches.length, 'position patches');
+    	}
 		if (!this.mesh) {
 			this.mesh = renderer.createMesh({
 				attributes: [
@@ -124,6 +141,23 @@ export default class TileExtrudedMesh extends RenderableObject3D {
 		}
 
 		this.meshDisplayBufferPatches.length = 0;
+
+		for (const {start, size, dx, dy, dz} of this.meshPositionBufferPatches) {
+			const buffer = this.mesh.getAttribute('position').buffer;
+			const data = buffer.data;
+
+			// position is 3 floats per vertex (x, y, z) — unlike the 1-byte-per-vertex
+			// 'display' buffer above, we must multiply vertex indices by 3.
+			for (let i = start; i < start + size; i++) {
+				data[i * 3]     += dx;
+				data[i * 3 + 1] += dy;
+				data[i * 3 + 2] += dz;
+			}
+
+			buffer.setData(data);
+		}
+
+		this.meshPositionBufferPatches.length = 0;
 	}
 
 	public dispose(): void {

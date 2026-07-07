@@ -229,7 +229,7 @@ export default class GBufferPass extends Pass<{
         const timePhase = (sceneSystem as any).timeElapsed * 2.0 || 0; 
 
         // 1. SET CLIPPING DISTANCES
-        const artificialNear = 100.0; 
+        const artificialNear = 5.0; 
         const artificialFar = 5000.0;
 
         // 2. CALCULATE DYNAMIC TILT ANGLES

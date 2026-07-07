@@ -242,6 +242,39 @@ export default class Tile extends Object3D {
 		this.extrudedMesh.addDisplayBufferPatch({start, size, value: 0});
 		this.buildingVisibilityMap.set(id, true);
 	}
+	public translateBuilding(packedId: number, dx: number, dy: number, dz: number): boolean {
+    const offset = this.buildingOffsetMap.get(packedId);
+
+    if (!offset) {
+        return false;
+    }
+
+    const [start, size] = offset;
+    this.extrudedMesh.addPositionPatch({start, size, dx, dy, dz});
+
+    return true;
+	}
+
+	public getBuildingCentroid(packedId: number): Vec3 | null {
+		const offset = this.buildingOffsetMap.get(packedId);
+
+		if (!offset) {
+			return null;
+		}
+
+		const [start, size] = offset;
+		const positions = this.extrudedMesh['buffers'].positionBuffer;
+
+		let sumX = 0, sumY = 0, sumZ = 0;
+
+		for (let i = start; i < start + size; i++) {
+			sumX += positions[i * 3];
+			sumY += positions[i * 3 + 1];
+			sumZ += positions[i * 3 + 2];
+		}
+
+		return new Vec3(sumX / size, sumY / size, sumZ / size);
+	}
 
 	public isBuildingVisible(id: number): boolean {
 		return this.buildingVisibilityMap.get(id);

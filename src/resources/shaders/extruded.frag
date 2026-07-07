@@ -94,7 +94,6 @@ void main() {
     
     if (!gl_FrontFacing) {
         outObjectId = 4294967295u; 
-        outColor = vec4(1.0, 0.0, 1.0, 1.0); // Force the pixels to NEON PINK
     } else {
         outObjectId = vObjectId;
         // (Leave the standard outColor assignment above this block intact)

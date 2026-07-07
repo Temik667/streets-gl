@@ -269,7 +269,7 @@ export default class SceneSystem extends System {
         this.objects.csm.intensity = lightIntensity;
         this.objects.csm.update();
 
-        this.updateTiles();
+    this.updateTiles();
 
         //this.scene.updateMatrixRecursively();
         this.scene.updateMatrixWorldRecursively();

@@ -30,7 +30,10 @@ module.exports = (env, argv) => ([{
 		]
 	},
 	devServer: {
-		hot: true
+		hot: true,
+		client: {
+        overlay: false
+    }
 	},
 	devtool: argv.mode === 'production' ? undefined : 'inline-source-map',
 	plugins: [

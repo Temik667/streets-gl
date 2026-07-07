@@ -29,6 +29,19 @@ import ResourceLoader from "~/app/world/ResourceLoader";
 import {RendererTypes} from "~/lib/renderer/RendererTypes";
 import ControlsSystem from "~/app/systems/ControlsSystem";
 import CursorStyleSystem from "~/app/systems/CursorStyleSystem";
+import Vec3 from "~/lib/math/Vec3";
+import AABB3D from "~/lib/math/AABB3D";
+import Tile from "../objects/Tile";
+
+export interface BuildingInjectionResult {
+    tileLocalId: number;
+    buildingIdA: number;
+    buildingIdB: number;
+    dx: number;
+    dy: number;
+    dz: number;
+    overlapFraction: number;
+}
 
 export default class RenderSystem extends System {
     private renderer: AbstractRenderer;
@@ -149,33 +162,6 @@ export default class RenderSystem extends System {
             jitterFactor
         );
 
-        // --- 3. TILT/SHEAR ANOMALY INJECTION ---
-        // REMOVED: this previously applied a per-frame oscillating sin/cos shear
-        // to projectionMatrix[8]/[9] on EVERY frame, regardless of which error
-        // type was being generated. That meant the "clean" baseline, aliasing,
-        // and shadow-anomaly datasets all silently contained a time-varying
-        // shear artifact stacked on top of (and interacting unpredictably with)
-        // the tiltX/tiltY values your Python script injects into GBufferPass.ts.
-        //
-        // If GBufferPass.ts's artificialNear/artificialFar/tiltX/tiltY already
-        // implement your intended tilt-clipping error end-to-end (i.e. the
-        // shader/projection setup there reads tiltX/tiltY and applies the
-        // shear only for that error type), then this block should stay removed
-        // entirely. If GBufferPass.ts's tiltX/tiltY constants are NOT actually
-        // wired into the projection matrix anywhere, and this was the only
-        // place the tilt was ever applied, you need to re-introduce a gated
-        // version instead — something like:
-        //
-        // if (this.errorInjectionMode === 'clipping') {
-        //     const pass = <GBufferPass>this.passManager.getPass('GBufferPass');
-        //     sceneSystem.objects.camera.projectionMatrix[8] += pass.tiltX;
-        //     sceneSystem.objects.camera.projectionMatrix[9] += pass.tiltY;
-        // }
-        //
-        // i.e. driven by the static constants your Python regex already
-        // writes, not by a hardcoded sinusoid keyed to elapsed time. Check
-        // GBufferPass.ts before deciding which path applies.
-
         sceneSystem.objects.camera.updateFrustum();
 
         this.renderGraph.render();
@@ -275,32 +261,6 @@ export default class RenderSystem extends System {
         // 4294967295 is the emergency flag we set in the fragment shader
         return objectId === 4294967295;
     }
-
-    /**
-     * Scans the WebGL object-ID buffer for the !gl_FrontFacing emergency flag,
-     * which indicates the near plane is clipping/penetrating building geometry
-     * somewhere on screen (or the camera itself is inside a building).
-     *
-     * FIX: the original version used `step = 1`, i.e. a single-pixel
-     * `readObjectId` GPU readback call for EVERY pixel on screen — at 1920x1080
-     * that's ~2,073,600 synchronous CPU<->GPU sync points per check, which will
-     * stall/hang the renderer (and likely the whole tab) for seconds at a time.
-     * The comment directly above the loop already described the intended
-     * mitigation ("scan every 50 pixels... sparse enough so the synchronous
-     * GPU reads do not freeze the browser") — the code just didn't match the
-     * comment. This version actually uses that step size.
-     *
-     * NOTE: this is still O((width/step) * (height/step)) single-pixel GPU
-     * reads, which is the right tradeoff only if `PickingSystem.readObjectId`
-     * truly only supports single-pixel reads. If your renderer/PickingSystem
-     * exposes a way to read the entire objectId render target in ONE call
-     * (e.g. a full-viewport gl.readPixels wrapped as something like
-     * `pickingSystem.readObjectIdBuffer(pass.objectIdFullBuffer)` returning a
-     * Uint32Array you can scan in JS), switch to that instead — it replaces
-     * thousands of GPU syncs with exactly one. See the commented-out
-     * `isScreenClippedFast` stub below for the shape that would take; you'll
-     * need to fill in the actual buffer-read API your engine exposes.
-     */
     public async isScreenClipped(): Promise<boolean> {
         const pass = <GBufferPass>this.passManager.getPass('GBufferPass');
         if (!pass) return false;
@@ -324,33 +284,148 @@ export default class RenderSystem extends System {
 
         return centerId === 4294967295;
     }
+    /**
+     * Checks whether a tile-local point is within the camera's visible frustum.
+     * Uses the engine's own isFrustumIntersectsBoundingBox method (same one
+     * RenderableObject3D.inCameraFrustum uses) rather than hand-rolled NDC math,
+     * since this engine uses a floating-origin coordinate convention where
+     * camera.matrixWorldInverse does NOT encode absolute world translation —
+     * GBufferPass.getCameraPositionRelativeToTile handles that offset manually.
+     */
+    private isPointInFrustum(camera: Camera, tile: Tile, tileLocalPoint: Vec3): boolean {
+        const padding = 1.0;
+        const min = new Vec3(
+            tileLocalPoint.x - padding,
+            tileLocalPoint.y - padding,
+            tileLocalPoint.z - padding
+        );
+        const max = new Vec3(
+            tileLocalPoint.x + padding,
+            tileLocalPoint.y + padding,
+            tileLocalPoint.z + padding
+        );
+        const box = new AABB3D(min, max);
 
-    // --- OPTIONAL FAST PATH (not active) ---
-    // Sketch only. Uncomment and adapt once you confirm what your renderer/
-    // PickingSystem actually expose for a full-buffer read. The goal: ONE
-    // GPU readback of the whole objectId target, then scan the typed array
-    // in plain JS (cheap, no further GPU sync).
-    //
-    // public isScreenClippedFast(): boolean {
-    //     const pass = <GBufferPass>this.passManager.getPass('GBufferPass');
-    //     if (!pass) return false;
-    //
-    //     const pickingSystem = this.systemManager.getSystem(PickingSystem);
-    //     const width = this.resolutionUI.x;
-    //     const height = this.resolutionUI.y;
-    //
-    //     // Hypothetical full-buffer read — replace with your actual API.
-    //     // Needs to return a Uint32Array of length width * height, one
-    //     // object-id value per pixel, read in a single gl.readPixels call.
-    //     const fullBuffer: Uint32Array = pickingSystem.readObjectIdFullBuffer(
-    //         pass.objectIdTexture, width, height
-    //     );
-    //
-    //     for (let i = 0; i < fullBuffer.length; i++) {
-    //         if (fullBuffer[i] === 4294967295) {
-    //             return true;
-    //         }
-    //     }
-    //     return false;
-    // }
+        return camera.isFrustumIntersectsBoundingBox(box.toSpace(tile.matrixWorld));
+    }
+    /**
+     * Finds two buildings currently visible in the camera frustum and
+     * translates one toward the other to create a visible intersection/
+     * z-fighting anomaly. Returns true if an injection was successfully made,
+     * false if no suitable on-screen building pair was found (e.g. camera
+     * over water or empty terrain).
+     *
+     * Call from the browser console:
+     *   window.renderSystem.injectBuildingIntersection()
+     * or from Playwright:
+     *   await page.evaluate("window.renderSystem.injectBuildingIntersection()")
+     */
+    public injectBuildingIntersection(overlapFraction: number = 1, maxAttempts: number = 20): BuildingInjectionResult | null {
+        const sceneSystem = this.systemManager.getSystem(SceneSystem);
+        const tiles = sceneSystem.objects.tiles;
+        const camera = sceneSystem.objects.camera;
+
+        // Filter to tiles that are loaded, in-frustum, and have at least 2 buildings.
+        const candidateTiles = tiles.filter(tile =>
+            tile.inFrustum &&
+            tile.extrudedMesh &&
+            tile.buildingOffsetMap.size >= 2
+        );
+
+        if (candidateTiles.length === 0) {
+            console.warn('[injectBuildingIntersection] No candidate tiles found.');
+            return null;
+        }
+
+        // Sort by distance so we bias toward buildings close to and likely
+        // visible from the camera.
+        candidateTiles.sort((a, b) =>
+            (a.distanceToCamera ?? Infinity) - (b.distanceToCamera ?? Infinity)
+        );
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            // Cycle through tiles rather than hammering one repeatedly.
+            const tile = candidateTiles[attempt % candidateTiles.length];
+            const buildingIds = Array.from(tile.buildingOffsetMap.keys());
+
+            if (buildingIds.length < 2) {
+                continue;
+            }
+
+            const indexA = Math.floor(Math.random() * buildingIds.length);
+            let indexB = Math.floor(Math.random() * buildingIds.length);
+            while (indexB === indexA) {
+                indexB = Math.floor(Math.random() * buildingIds.length);
+            }
+
+            const idA = buildingIds[indexA];
+            const idB = buildingIds[indexB];
+
+            const centroidA = tile.getBuildingCentroid(idA);
+            const centroidB = tile.getBuildingCentroid(idB);
+
+            if (!centroidA || !centroidB) {
+                continue;
+            }
+
+            // Per-building frustum check using the engine's own method,
+            // passing tile-local centroids — toSpace(tile.matrixWorld) inside
+            // isPointInFrustum handles the coordinate conversion correctly.
+            if (!this.isPointInFrustum(camera, tile, centroidA) ||
+                !this.isPointInFrustum(camera, tile, centroidB)) {
+                continue;
+            }
+
+            const dx = (centroidB.x - centroidA.x) * overlapFraction;
+            const dy = (centroidB.y - centroidA.y) * overlapFraction;
+            const dz = (centroidB.z - centroidA.z) * overlapFraction;
+
+            const success = tile.translateBuilding(idA, dx, dy, dz);
+
+            if (!success) {
+                continue;
+            }
+
+            console.log(`[injectBuildingIntersection] attempt ${attempt + 1}: tile ${tile.localId}, ` +
+                `moving building ${idA} by dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, dz=${dz.toFixed(1)}`);
+
+            return {
+                tileLocalId: tile.localId,
+                buildingIdA: idA,
+                buildingIdB: idB,
+                dx,
+                dy,
+                dz,
+                overlapFraction
+            };
+        }
+
+        console.warn(`[injectBuildingIntersection] Gave up after ${maxAttempts} attempts — no on-screen pair found.`);
+        return null;
+    }
+
+    /**
+     * Replays a previously recorded building injection deterministically.
+     * Pass the BuildingInjectionResult object saved from a prior
+     * injectBuildingIntersection call to reproduce the exact same visual error.
+     * Returns true if the tile and building were found and the patch was applied.
+     */
+    public replayBuildingIntersection(result: BuildingInjectionResult): boolean {
+        const sceneSystem = this.systemManager.getSystem(SceneSystem);
+        const tiles = sceneSystem.objects.tiles;
+
+        const tile = tiles.find(t => t.localId === result.tileLocalId);
+
+        if (!tile) {
+            console.warn(`[replayBuildingIntersection] Tile ${result.tileLocalId} not found — is the same URL loaded?`);
+            return false;
+        }
+
+        if (!tile.extrudedMesh) {
+            console.warn(`[replayBuildingIntersection] Tile ${result.tileLocalId} has no extrudedMesh yet — tiles still loading?`);
+            return false;
+        }
+
+        return tile.translateBuilding(result.buildingIdA, result.dx, result.dy, result.dz);
+    }
 }
