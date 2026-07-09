@@ -22,6 +22,7 @@ import TexturePool from "~/app/render/TexturePool";
 interface SharedResources {
 	BackbufferRenderPass: RenderPassResource;
 	GBufferRenderPass: RenderPassResource;
+	DepthOutput: RenderPassResource;
 	ShadowMaps: RenderPassResource;
 	HDR: RenderPassResource;
 	TAAHistory: RenderPassResource;
@@ -315,6 +316,36 @@ export default class PassManager {
 						loadOp: RendererTypes.AttachmentLoadOp.Clear,
 						storeOp: RendererTypes.AttachmentStoreOp.Store
 					}
+				})
+			}),
+			// isUsedExternally keeps this pass from being culled by the render graph,
+			// since nothing else in the graph consumes its output — it exists purely
+			// so window.renderSystem.getDepthBuffer() can read it back on demand.
+			// isTransient: false keeps the physical resource attached after the frame
+			// finishes rendering (unlike transient resources, which get returned to the
+			// pool the instant render() returns) — required since readDepthBuffer() is
+			// read back asynchronously, outside the render loop.
+			DepthOutput: this.resourceFactory.createRenderPassResource({
+				name: 'DepthOutput',
+				isTransient: false,
+				isUsedExternally: true,
+				descriptor: new RenderPassResourceDescriptor({
+					colorAttachments: [
+						{
+							texture: new TextureResourceDescriptor({
+								type: TextureResourceType.Texture2D,
+								width: 1,
+								height: 1,
+								format: RendererTypes.TextureFormat.R32Float,
+								minFilter: RendererTypes.MinFilter.Nearest,
+								magFilter: RendererTypes.MagFilter.Nearest,
+								mipmaps: false
+							}),
+							clearValue: {r: 0, g: 0, b: 0, a: 1},
+							loadOp: RendererTypes.AttachmentLoadOp.Clear,
+							storeOp: RendererTypes.AttachmentStoreOp.Store
+						}
+					]
 				})
 			}),
 			ShadowMaps: this.resourceFactory.createRenderPassResource({
@@ -1268,6 +1299,7 @@ export default class PassManager {
 		const resolutionSceneHalf = new Vec2(Math.floor(resolutionScene.x * 0.5), Math.floor(resolutionScene.y * 0.5));
 
 		this.sharedResources.get('GBufferRenderPass').descriptor.setSize(resolutionScene.x, resolutionScene.y);
+		this.sharedResources.get('DepthOutput').descriptor.setSize(resolutionScene.x, resolutionScene.y);
 		this.sharedResources.get('HDR').descriptor.setSize(resolutionScene.x, resolutionScene.y);
 		this.sharedResources.get('TAAHistory').descriptor.setSize(resolutionScene.x, resolutionScene.y);
 		this.sharedResources.get('HDRAntialiased').descriptor.setSize(resolutionScene.x, resolutionScene.y);

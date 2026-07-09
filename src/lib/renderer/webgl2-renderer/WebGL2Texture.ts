@@ -25,6 +25,7 @@ export default abstract class WebGL2Texture implements AbstractTexture {
 	protected gl: WebGL2RenderingContext;
 	public WebGLTexture: WebGLTexture;
 	private pixelPackBuffer: WebGLBuffer = null;
+	private pixelPackBufferSize = 0;
 	protected deleted = false;
 
 	protected constructor(
@@ -134,9 +135,18 @@ export default abstract class WebGL2Texture implements AbstractTexture {
 		this.gl.texParameterf(this.textureTypeConstant, extension, this.anisotropy);
 	}
 
-	public getPixelPackBuffer(): WebGLBuffer {
-		if (this.pixelPackBuffer) {
+	// pixelCount defaults to 1 to match every existing single-pixel-picking caller
+	// (requestObjectIdAt, isCameraInsideBuilding, ...); the buffer is grown (and
+	// cached at the new size) on demand for larger region reads.
+	public getPixelPackBuffer(pixelCount = 1): WebGLBuffer {
+		const requiredSize = WebGL2Texture.getFormatByteSize(this.format) * pixelCount;
+
+		if (this.pixelPackBuffer && this.pixelPackBufferSize >= requiredSize) {
 			return this.pixelPackBuffer;
+		}
+
+		if (this.pixelPackBuffer) {
+			this.renderer.gl.deleteBuffer(this.pixelPackBuffer);
 		}
 
 		const buffer = this.renderer.gl.createBuffer();
@@ -144,10 +154,13 @@ export default abstract class WebGL2Texture implements AbstractTexture {
 		this.renderer.gl.bindBuffer(this.renderer.gl.PIXEL_PACK_BUFFER, buffer);
 		this.renderer.gl.bufferData(
 			this.renderer.gl.PIXEL_PACK_BUFFER,
-			WebGL2Texture.getFormatByteSize(this.format),
+			requiredSize,
 			WebGL2Constants.DYNAMIC_READ
 		);
 		this.renderer.gl.bindBuffer(this.renderer.gl.PIXEL_PACK_BUFFER, null);
+
+		this.pixelPackBuffer = buffer;
+		this.pixelPackBufferSize = requiredSize;
 
 		return buffer;
 	}

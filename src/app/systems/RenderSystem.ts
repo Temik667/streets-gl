@@ -2,6 +2,7 @@ import Vec2 from "~/lib/math/Vec2";
 import System from "../System";
 import PickingSystem from "./PickingSystem";
 import GBufferPass from "../render/passes/GBufferPass";
+import DepthOutputPass, {DepthBufferResult} from "../render/passes/DepthOutputPass";
 import WebGL2Renderer from "~/lib/renderer/webgl2-renderer/WebGL2Renderer";
 import AbstractRenderer from "~/lib/renderer/abstract-renderer/AbstractRenderer";
 import * as RG from "~/lib/render-graph";
@@ -88,6 +89,7 @@ export default class RenderSystem extends System {
 
         this.passManager.addPasses(
             new GBufferPass(this.passManager),
+            new DepthOutputPass(this.passManager),
             new TAAPass(this.passManager),
             new ShadowMappingPass(this.passManager),
             new ShadingPass(this.passManager),
@@ -284,6 +286,33 @@ export default class RenderSystem extends System {
 
         return centerId === 4294967295;
     }
+
+    /**
+     * Returns the per-pixel linear depth (distance from the camera, in meters)
+     * for the last rendered frame, at the resolution of the 3D scene (see
+     * resolutionScene — this shrinks when aliasing degradation is injected).
+     *
+     * `data` is a flat, JSON-friendly row-major array of length width * height,
+     * top-left origin, one float per pixel — pair it with the screenshot to get
+     * ground-truth depth alongside the RGB image.
+     *
+     * Call from Playwright:
+     *   await page.evaluate("window.renderSystem.getDepthBuffer()")
+     */
+    public async getDepthBuffer(): Promise<{ width: number; height: number; data: number[] } | null> {
+        const pass = <DepthOutputPass>this.passManager.getPass('DepthOutputPass');
+
+        if (!pass) return null;
+
+        const result: DepthBufferResult = await pass.readDepthBuffer();
+
+        return {
+            width: result.width,
+            height: result.height,
+            data: Array.from(result.data)
+        };
+    }
+
     /**
      * Checks whether a tile-local point is within the camera's visible frustum.
      * Uses the engine's own isFrustumIntersectsBoundingBox method (same one

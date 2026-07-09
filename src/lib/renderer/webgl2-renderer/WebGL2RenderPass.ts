@@ -93,15 +93,18 @@ export default class WebGL2RenderPass implements AbstractRenderPass {
 		height = 1
 	): Promise<void> {
 		const texture = this.colorAttachments[attachmentId].texture as WebGL2Texture;
-		const pixelBuffer = texture.getPixelPackBuffer();
+		const pixelBuffer = texture.getPixelPackBuffer(width * height);
 
 		this.renderer.bindFramebuffer(this.framebuffer);
 		this.renderer.gl.readBuffer(WebGL2Constants.COLOR_ATTACHMENT0 + attachmentId);
 
 		const {format, type} = WebGL2Texture.convertFormatToWebGLConstants(texture.format);
 
+		// readPixels uses a bottom-left origin, while (x, y) here is top-left —
+		// texture.height - y - height flips a region of any size (this reduces
+		// to the original texture.height - y - 1 for the default 1x1 read).
 		this.renderer.gl.bindBuffer(WebGL2Constants.PIXEL_PACK_BUFFER, pixelBuffer);
-		this.renderer.gl.readPixels(x, texture.height - y - 1, width, height, format, type, 0);
+		this.renderer.gl.readPixels(x, texture.height - y - height, width, height, format, type, 0);
 		this.renderer.gl.bindBuffer(WebGL2Constants.PIXEL_PACK_BUFFER, null);
 
 		await this.renderer.fence();
