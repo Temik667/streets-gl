@@ -255,6 +255,76 @@ export default class Tile extends Object3D {
     return true;
 	}
 
+	/**
+	 * Returns the roof plane height of a building, how many of its vertices sit
+	 * on that plane, and a "roof signature" identifying the roof's appearance.
+	 * A flat-roofed extruded building has its entire roof polygon (plus the top
+	 * wall ring) at maxY, so a high flatVertexCount is a cheap signal that the
+	 * roof is flat rather than pitched/gabled.
+	 *
+	 * roofSignature packs the dominant texture id and RGB color of the upward-
+	 * facing roof vertices into one number; two roofs with equal signatures look
+	 * identical, so overlapping them coplanar would z-fight invisibly (the winner
+	 * looks the same either way). Comparing signatures lets the injector require a
+	 * VISIBLE fight — different roof textures/colors placed together.
+	 */
+	public getBuildingRoofInfo(packedId: number): {maxY: number; flatVertexCount: number; roofSignature: number} | null {
+		const offset = this.buildingOffsetMap.get(packedId);
+
+		if (!offset) {
+			return null;
+		}
+
+		const [start, size] = offset;
+		const buffers = this.extrudedMesh['buffers'];
+		const positions = buffers.positionBuffer;
+		const normals = buffers.normalBuffer;
+		const textureIds = buffers.textureIdBuffer;
+		const colors = buffers.colorBuffer;
+
+		let maxY = -Infinity;
+
+		for (let i = start; i < start + size; i++) {
+			maxY = Math.max(maxY, positions[i * 3 + 1]);
+		}
+
+		let flatVertexCount = 0;
+		// Tally the (textureId, color) of upward-facing roof-plane vertices and
+		// take the most common one as the roof's visible signature.
+		const signatureCounts = new Map<number, number>();
+
+		for (let i = start; i < start + size; i++) {
+			const onRoofPlane = positions[i * 3 + 1] > maxY - 0.01;
+
+			if (!onRoofPlane) {
+				continue;
+			}
+
+			flatVertexCount++;
+
+			// normal.y > 0.5 keeps wall-top vertices (which also sit at maxY but
+			// face sideways) out of the roof-appearance tally.
+			if (normals[i * 3 + 1] <= 0.5) {
+				continue;
+			}
+
+			const sig = (textureIds[i] << 24) | (colors[i * 3] << 16) | (colors[i * 3 + 1] << 8) | colors[i * 3 + 2];
+			signatureCounts.set(sig, (signatureCounts.get(sig) ?? 0) + 1);
+		}
+
+		let roofSignature = -1;
+		let bestCount = 0;
+
+		for (const [sig, count] of signatureCounts) {
+			if (count > bestCount) {
+				bestCount = count;
+				roofSignature = sig;
+			}
+		}
+
+		return {maxY, flatVertexCount, roofSignature};
+	}
+
 	public getBuildingCentroid(packedId: number): Vec3 | null {
 		const offset = this.buildingOffsetMap.get(packedId);
 

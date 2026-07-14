@@ -84,9 +84,17 @@ export default class GBufferPass extends Pass<{
     public objectIdBuffer: Uint32Array = new Uint32Array(1);
     public objectIdX = 0;
     public objectIdY = 0;
+    // Clipping anomaly parameters, settable at runtime via
+    // window.renderSystem.setClippingParams() — no source rewrite/rebuild needed.
+    // Baseline: near 5, far 5000, tilts 0 (tilts are tangent gradients, not degrees).
+    public errorNearClip: number = 5.0;
+    public errorFarClip: number = 5000.0;
+    public planeTiltX: number = 0.0000;
+    public planeTiltY: number = 0.0000;
     private fullScreenTriangle: FullScreenTriangle;
     // --- Added for deterministic on-demand object-id reads (debug / dataset QA) ---
     private pendingIdRequest: { x: number; y: number; resolve: (id: number) => void } | null = null;
+    private pendingVisibleIdsRequest: ((ids: Uint32Array) => void) | null = null;
 
     public constructor(manager: PassManager) {
         super('GBufferPass', manager, {
@@ -228,32 +236,24 @@ export default class GBufferPass extends Pass<{
         const sceneSystem = this.manager.systemManager.getSystem(SceneSystem);
         const timePhase = (sceneSystem as any).timeElapsed * 2.0 || 0; 
 
-        // 1. SET CLIPPING DISTANCES
-        const artificialNear = 5.0; 
-        const artificialFar = 5000.0;
-
-        // 2. CALCULATE DYNAMIC TILT ANGLES
-        const tiltX = 0.0000;
-        const tiltY = 0.0000;
-
         this.renderer.useMaterial(this.extrudedMeshMaterial);
 
         this.extrudedMeshMaterial.getUniform('projectionMatrix', 'PerMaterial').value = new Float32Array(camera.jitteredProjectionMatrix.values);
         this.extrudedMeshMaterial.getUniform<UniformFloat1>('windowLightThreshold', 'PerMaterial').value[0] = windowLightThreshold;
 
-        // 3. BIND DISTANCE UNIFORMS
+        // BIND CLIPPING DISTANCE UNIFORMS (runtime-settable via setClippingParams)
         const uNearClip = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_errorNearClip', 'PerMaterial');
-        if (uNearClip) uNearClip.value[0] = artificialNear;
+        if (uNearClip) uNearClip.value[0] = this.errorNearClip;
 
         const uFarClip = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_errorFarClip', 'PerMaterial');
-        if (uFarClip) uFarClip.value[0] = artificialFar;
+        if (uFarClip) uFarClip.value[0] = this.errorFarClip;
 
-        // 4. BIND TILT UNIFORMS
+        // BIND TILT UNIFORMS
         const uTiltX = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_planeTiltX', 'PerMaterial');
-        if (uTiltX) uTiltX.value[0] = tiltX;
+        if (uTiltX) uTiltX.value[0] = this.planeTiltX;
 
         const uTiltY = this.extrudedMeshMaterial.getUniform<UniformFloat1>('u_planeTiltY', 'PerMaterial');
-        if (uTiltY) uTiltY.value[0] = tiltY;
+        if (uTiltY) uTiltY.value[0] = this.planeTiltY;
 
         this.extrudedMeshMaterial.updateUniformBlock('PerMaterial');
 
@@ -563,6 +563,38 @@ export default class GBufferPass extends Pass<{
         });
     }
 
+    /**
+     * Requests a full-frame read of the object-id attachment on the NEXT render
+     * pass. Resolves with one uint32 per pixel: 0 for non-building surfaces
+     * (terrain, roads, trees, sky, ...), (tileId << 16) + localId + 1 for
+     * building fragments, 4294967295 for the inside-a-building emergency flag.
+     */
+    public requestVisibleObjectIds(): Promise<Uint32Array> {
+        return new Promise<Uint32Array>((resolve) => {
+            this.pendingVisibleIdsRequest = resolve;
+        });
+    }
+
+    private processVisibleIdsRequest(): void {
+        if (!this.pendingVisibleIdsRequest) {
+            return;
+        }
+
+        const resolve = this.pendingVisibleIdsRequest;
+        this.pendingVisibleIdsRequest = null;
+
+        const mainRenderPass = this.getPhysicalResource('GBufferRenderPass');
+        const texture = mainRenderPass.colorAttachments[4].texture;
+        const buffer = new Uint32Array(texture.width * texture.height);
+
+        // The GL read commands are issued synchronously while the (transient)
+        // render pass is still attached this frame; only the buffer download
+        // completes later, after the GPU fence.
+        mainRenderPass
+            .readColorAttachmentPixel(4, buffer, 0, 0, texture.width, texture.height)
+            .then(() => resolve(buffer));
+    }
+
     private getInstancesOrigin(camera: Camera): Vec2 {
         return new Vec2(
             Math.floor(camera.position.x / 10000) * 10000,
@@ -601,6 +633,7 @@ export default class GBufferPass extends Pass<{
         this.renderHuggingMeshes();
         this.renderInstances(instancesOrigin);
         this.writeToObjectIdBuffer();
+        this.processVisibleIdsRequest();
 
         this.saveCameraMatrixWorldInverse();
     }

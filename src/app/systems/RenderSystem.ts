@@ -29,6 +29,7 @@ import AbstractTexture2D from "~/lib/renderer/abstract-renderer/AbstractTexture2
 import ResourceLoader from "~/app/world/ResourceLoader";
 import {RendererTypes} from "~/lib/renderer/RendererTypes";
 import ControlsSystem from "~/app/systems/ControlsSystem";
+import TerrainSystem from "~/app/systems/TerrainSystem";
 import CursorStyleSystem from "~/app/systems/CursorStyleSystem";
 import Vec3 from "~/lib/math/Vec3";
 import AABB3D from "~/lib/math/AABB3D";
@@ -47,6 +48,9 @@ export interface BuildingInjectionResult {
 export default class RenderSystem extends System {
     private renderer: AbstractRenderer;
     private frameCount: number = 0;
+    // Aliasing anomaly parameter, settable at runtime via setDegradationFactor().
+    // 1.0 = native resolution; 0.25 or lower = severe, blocky, PS1-era aliasing.
+    public degradationFactor: number = 1.0;
 
     private renderGraph: RG.RenderGraph;
     private renderGraphResourceFactory: RenderGraphResourceFactory;
@@ -228,19 +232,45 @@ export default class RenderSystem extends System {
 
     public get resolutionScene(): Vec2 {
         // --- SENSOR DEGRADATION ---
-        // 1.0 is native resolution.
-        // 0.5 is half resolution (standard aliasing).
-        // 0.25 or lower creates severe, blocky, PS1-era aliasing and flickering geometry.
-        // This constant is rewritten in-place by StreetsGL.inject_aliasing() (Python side)
-        // via a regex on "const degradationFactor = 1.0;" before the browser is launched.
-        // It will NOT pick up changes while the page is already running — the file must
-        // be edited before page load/reload, since this getter is just re-read every frame.
-        const degradationFactor = 1.0;
-
+        // degradationFactor is a public field set at runtime by setDegradationFactor()
+        // (called from Playwright via window.renderSystem) — no source rewrite needed.
         return new Vec2(
-            Math.floor(window.innerWidth * degradationFactor),
-            Math.floor(window.innerHeight * degradationFactor)
+            Math.floor(window.innerWidth * this.degradationFactor),
+            Math.floor(window.innerHeight * this.degradationFactor)
         );
+    }
+
+    /**
+     * Runtime anomaly setters for automated dataset generation. Each replaces a
+     * former source-constant rewrite (Python regex + webpack rebuild per image),
+     * which leaked dev-server memory and eventually OOM'd Node on long runs.
+     *
+     * Call from Playwright, e.g.:
+     *   await page.evaluate("window.renderSystem.setDegradationFactor(0.25)")
+     */
+    public setDegradationFactor(factor: number): void {
+        this.degradationFactor = factor;
+        // Render targets are only sized on resize events, so re-run it now.
+        this.resize();
+    }
+
+    /** Tilts are tangent gradients (tan of the tilt angle), not degrees. */
+    public setClippingParams(near: number, far: number, tiltX: number, tiltY: number): void {
+        const pass = <GBufferPass>this.passManager.getPass('GBufferPass');
+
+        if (!pass) return;
+
+        pass.errorNearClip = near;
+        pass.errorFarClip = far;
+        pass.planeTiltX = tiltX;
+        pass.planeTiltY = tiltY;
+    }
+
+    public setShadowBiases(shadowBias: number, normalBias: number): void {
+        const sceneSystem = this.systemManager.getSystem(SceneSystem);
+
+        sceneSystem.injectedShadowBias = shadowBias;
+        sceneSystem.injectedNormalBias = normalBias;
     }
 
     /**
@@ -285,6 +315,71 @@ export default class RenderSystem extends System {
         const centerId = await pass.requestObjectIdAt(width / 2, height / 2);
 
         return centerId === 4294967295;
+    }
+
+    /**
+     * Returns true when the camera sits below the terrain surface (plus a small
+     * margin), which produces garbage frames where the ground is see-through.
+     * Uses the same TerrainHeightProvider the free-camera navigator clamps
+     * against, so the height convention (mercator-scaled meters) matches
+     * camera.position exactly.
+     *
+     * Returns false when height data isn't loaded yet for this spot — the check
+     * is deliberately permissive rather than rejecting shots on missing data.
+     *
+     * Call from Playwright:
+     *   await page.evaluate("window.renderSystem.isCameraUnderTerrain()")
+     */
+    /**
+     * Counts the distinct buildings visible in the current frame by reading the
+     * G-buffer's object-id attachment (only building fragments write non-zero
+     * ids). Buildings covering fewer than minPixels pixels are ignored so that
+     * distant slivers on the horizon don't inflate the count.
+     *
+     * Used by the intersection-anomaly generator to keep only sparse scenes
+     * where the injected building overlap is clearly identifiable.
+     *
+     * Call from Playwright:
+     *   await page.evaluate("window.renderSystem.countVisibleBuildings()")
+     */
+    public async countVisibleBuildings(minPixels: number = 30): Promise<number | null> {
+        const pass = <GBufferPass>this.passManager.getPass('GBufferPass');
+
+        if (!pass) return null;
+
+        const ids = await pass.requestVisibleObjectIds();
+        const pixelsPerId = new Map<number, number>();
+
+        for (let i = 0; i < ids.length; i++) {
+            const id = ids[i];
+
+            if (id === 0 || id === 4294967295) continue;
+
+            pixelsPerId.set(id, (pixelsPerId.get(id) ?? 0) + 1);
+        }
+
+        let count = 0;
+
+        for (const pixels of pixelsPerId.values()) {
+            if (pixels >= minPixels) count++;
+        }
+
+        return count;
+    }
+
+    public isCameraUnderTerrain(margin: number = 1.0): boolean {
+        const camera = this.systemManager.getSystem(SceneSystem).objects.camera;
+        const terrainSystem = this.systemManager.getSystem(TerrainSystem);
+
+        const terrainHeight = terrainSystem.terrainHeightProvider.getHeightGlobalInterpolated(
+            camera.position.x,
+            camera.position.z,
+            true
+        );
+
+        if (terrainHeight === null) return false;
+
+        return camera.position.y < terrainHeight + margin;
     }
 
     /**
@@ -349,7 +444,7 @@ export default class RenderSystem extends System {
      * or from Playwright:
      *   await page.evaluate("window.renderSystem.injectBuildingIntersection()")
      */
-    public injectBuildingIntersection(overlapFraction: number = 1, maxAttempts: number = 20): BuildingInjectionResult | null {
+    public injectBuildingIntersection(overlapFraction: number = 1, maxAttempts: number = 20, maxCameraDistance: number = 400): BuildingInjectionResult | null {
         const sceneSystem = this.systemManager.getSystem(SceneSystem);
         const tiles = sceneSystem.objects.tiles;
         const camera = sceneSystem.objects.camera;
@@ -371,6 +466,9 @@ export default class RenderSystem extends System {
         candidateTiles.sort((a, b) =>
             (a.distanceToCamera ?? Infinity) - (b.distanceToCamera ?? Infinity)
         );
+
+        // The camera's position in the camera-relative space tile.matrixWorld maps to.
+        const cameraRelativePos = new Vec3(0, camera.position.y, 0);
 
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             // Cycle through tiles rather than hammering one repeatedly.
@@ -405,6 +503,15 @@ export default class RenderSystem extends System {
                 continue;
             }
 
+            // Reject far-away pairs: a distant intersection isn't practically
+            // visible to a human even if it changes enough pixels to pass
+            // verification. tile.matrixWorld yields camera-relative coords, so
+            // compare against cameraRelativePos, not the absolute camera.position.
+            const worldA = Vec3.applyMatrix4(centroidA, tile.matrixWorld);
+            if (Vec3.distance(worldA, cameraRelativePos) > maxCameraDistance) {
+                continue;
+            }
+
             const dx = (centroidB.x - centroidA.x) * overlapFraction;
             const dy = (centroidB.y - centroidA.y) * overlapFraction;
             const dz = (centroidB.z - centroidA.z) * overlapFraction;
@@ -430,6 +537,151 @@ export default class RenderSystem extends System {
         }
 
         console.warn(`[injectBuildingIntersection] Gave up after ${maxAttempts} attempts — no on-screen pair found.`);
+        return null;
+    }
+
+    /**
+     * Like injectBuildingIntersection, but engineered to produce true z-fighting
+     * rather than clean interpenetration seams. Z-fighting needs two surfaces at
+     * (nearly) identical depth, so this picks two FLAT-ROOFED buildings, slides
+     * one horizontally into the other, and shifts it vertically so both roof
+     * planes are EXACTLY coplanar. The two roofs have different triangulations,
+     * so their interpolated depths differ by sub-precision amounts across the
+     * overlap area — the classic stitching/shimmering artifact.
+     *
+     * Call from Playwright:
+     *   await page.evaluate("window.renderSystem.injectBuildingZFighting()")
+     */
+    public injectBuildingZFighting(
+        overlapFraction: number = 0.85,
+        maxTiles: number = 8,
+        maxRoofHeightDelta: number = 8,
+        minFlatVertices: number = 6,
+        maxPairDistance: number = 60,
+        minPairDistance: number = 1.5,
+        maxCameraDistance: number = 400
+    ): BuildingInjectionResult | null {
+        const sceneSystem = this.systemManager.getSystem(SceneSystem);
+        const tiles = sceneSystem.objects.tiles;
+        const camera = sceneSystem.objects.camera;
+
+        const candidateTiles = tiles.filter(tile =>
+            tile.inFrustum &&
+            tile.extrudedMesh &&
+            tile.buildingOffsetMap.size >= 2
+        );
+
+        if (candidateTiles.length === 0) {
+            console.warn('[injectBuildingZFighting] No candidate tiles found.');
+            return null;
+        }
+
+        // Nearest tiles first so the z-fight lands close to the camera.
+        candidateTiles.sort((a, b) =>
+            (a.distanceToCamera ?? Infinity) - (b.distanceToCamera ?? Infinity)
+        );
+
+        // The camera's position in the camera-relative space tile.matrixWorld maps to.
+        const cameraRelativePos = new Vec3(0, camera.position.y, 0);
+
+        for (const tile of candidateTiles.slice(0, maxTiles)) {
+            // Collect every flat-roofed, on-screen building in this tile.
+            const suitable: {id: number; centroid: Vec3; maxY: number; roofSignature: number}[] = [];
+
+            for (const id of tile.buildingOffsetMap.keys()) {
+                const centroid = tile.getBuildingCentroid(id);
+                const roof = tile.getBuildingRoofInfo(id);
+
+                if (!centroid || !roof) continue;
+                if (roof.flatVertexCount < minFlatVertices) continue;
+                if (roof.roofSignature < 0) continue;
+                if (!this.isPointInFrustum(camera, tile, centroid)) continue;
+
+                // Reject buildings too far from the camera: a distant z-fight,
+                // even if it changes enough pixels to pass verification, is not
+                // practically visible to a human. tile.matrixWorld yields
+                // CAMERA-RELATIVE coords (the tile hierarchy is offset by
+                // -camera.x/-camera.z via the scene wrapper), so the camera sits
+                // at (0, camera.position.y, 0) in this space — NOT at the absolute
+                // mercator camera.position.
+                const worldCentroid = Vec3.applyMatrix4(centroid, tile.matrixWorld);
+                if (Vec3.distance(worldCentroid, cameraRelativePos) > maxCameraDistance) continue;
+
+                suitable.push({id, centroid, maxY: roof.maxY, roofSignature: roof.roofSignature});
+            }
+
+            if (suitable.length < 2) {
+                continue;
+            }
+
+            // Find the CLOSEST compatible pair. A small separation keeps the
+            // horizontal slide short, so building A stays near B and on screen —
+            // the failure mode we're avoiding is teleporting A hundreds of metres
+            // into a far-away partner, which produces a tiny z-fight in the
+            // distance instead of a prominent near-field one.
+            let best: {a: typeof suitable[0]; b: typeof suitable[0]; dist: number} | null = null;
+
+            for (let i = 0; i < suitable.length; i++) {
+                for (let j = i + 1; j < suitable.length; j++) {
+                    const a = suitable[i];
+                    const b = suitable[j];
+
+                    if (Math.abs(a.maxY - b.maxY) > maxRoofHeightDelta) continue;
+
+                    // Require DIFFERENT roof appearance, else the coplanar overlap
+                    // renders identically whichever surface wins and the z-fight is
+                    // invisible ("normalized"). This is the fix the user asked for:
+                    // only place roofs of different textures/colors together.
+                    if (a.roofSignature === b.roofSignature) continue;
+
+                    const ddx = b.centroid.x - a.centroid.x;
+                    const ddz = b.centroid.z - a.centroid.z;
+                    const dist = Math.sqrt(ddx * ddx + ddz * ddz);
+
+                    // Below minPairDistance the two ids are almost always parts of
+                    // the SAME physical building (Simple 3D Buildings splits a
+                    // building into parts sharing a footprint) — overlapping those
+                    // is a no-op, so require a real gap between distinct buildings.
+                    if (dist < minPairDistance || dist > maxPairDistance) continue;
+
+                    if (!best || dist < best.dist) {
+                        best = {a, b, dist};
+                    }
+                }
+            }
+
+            if (!best) {
+                continue;
+            }
+
+            // Move the taller-index building toward the other, aligning roofs exactly.
+            const {a, b} = best;
+            const dx = (b.centroid.x - a.centroid.x) * overlapFraction;
+            const dz = (b.centroid.z - a.centroid.z) * overlapFraction;
+            const dy = b.maxY - a.maxY;
+
+            const success = tile.translateBuilding(a.id, dx, dy, dz);
+
+            if (!success) {
+                continue;
+            }
+
+            console.log(`[injectBuildingZFighting] tile ${tile.localId}, ` +
+                `moving building ${a.id} by dx=${dx.toFixed(1)}, dy=${dy.toFixed(3)}, dz=${dz.toFixed(1)} ` +
+                `(pair ${best.dist.toFixed(1)}m apart, roof planes aligned at y=${b.maxY.toFixed(2)})`);
+
+            return {
+                tileLocalId: tile.localId,
+                buildingIdA: a.id,
+                buildingIdB: b.id,
+                dx,
+                dy,
+                dz,
+                overlapFraction
+            };
+        }
+
+        console.warn(`[injectBuildingZFighting] Gave up — no nearby flat-roofed on-screen pair found.`);
         return null;
     }
 

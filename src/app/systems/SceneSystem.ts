@@ -41,7 +41,12 @@ export default class SceneSystem extends System {
     public pivotDelta: Vec2 = new Vec2();
     
     // Added to track continuous time for our clipping oscillations
-    public timeElapsed: number = 0; 
+    public timeElapsed: number = 0;
+    // Shadow anomaly parameters, settable at runtime via
+    // window.renderSystem.setShadowBiases() — no source rewrite/rebuild needed.
+    // Standard values: shadowBias -0.003, shadowNormalBias 0.002.
+    public injectedShadowBias: number = -0.003;
+    public injectedNormalBias: number = 0.002;
 
     public postInit(): void {
         this.initScene();
@@ -251,18 +256,11 @@ export default class SceneSystem extends System {
         this.timeElapsed = (this.timeElapsed || 0) + deltaTime;
         const timePhase = this.timeElapsed * 2.0;
 
-        // --- INJECT SHADOW ANOMALIES (Targetable by Python) ---
-        // Standard shadowBias is -0.003. 
+        // --- INJECT SHADOW ANOMALIES (runtime-settable via setShadowBiases) ---
         // > 0.00  = Shadow Acne (Moiré patterns)
         // < -0.02 = Peter Panning (Detached, bleeding shadows)
-        const injectedShadowBias = -0.003; 
-        
-        // Standard shadowNormalBias is 0.002.
-        const injectedNormalBias = 0.002; 
-
-        // Apply to the Cascaded Shadow Map
-        this.objects.csm.shadowBias = injectedShadowBias;
-        this.objects.csm.shadowNormalBias = injectedNormalBias;
+        this.objects.csm.shadowBias = this.injectedShadowBias;
+        this.objects.csm.shadowNormalBias = this.injectedNormalBias;
         // ------------------------------------------------------
 
         this.objects.csm.direction = Vec3.clone(lightDirection);
